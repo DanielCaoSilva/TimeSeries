@@ -1,0 +1,120 @@
+---
+title: "STA 5250 Homework 8"
+author: "Daniel Silva"
+date: "Due 10/27/21"
+output:
+    pdf_document:
+      df_print: kable
+---
+
+```{r global_options, include=FALSE}
+# these are some optional settings that will change how some features look
+# you do not need to change them.
+knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
+```
+
+### Loading Relevant Packages
+
+```{r}
+# load any relevant packages here, if necessary
+library(fpp3)
+library(astsa)
+```
+
+# Question 4
+
+```{r}
+q4_data <- global_economy %>% filter(Country == "United States")  # replace COUNTRYNAME
+```
+
+## Part (a)
+
+```{r}
+q4_data %>% gg_tsdisplay(GDP,"partial")
+```
+
+## Part (b)
+ 
+```{r}
+q4_data %>% gg_tsdisplay(log(GDP),"partial")
+q4_data %>% gg_tsdisplay(difference(log(GDP)),"partial")
+```
+
+## Part (c)
+
+The PACF has only one significant value so that makes me think there is an AR(1) component and the ACF tails off very quickly which makes me think that there might be an MA component as well. It would have be to low since it does not override the PACF significant value of 1. 
+ 
+ARIMA(1,1,1) This is the one 
+ARIMA(2,1,1)
+ARIMA(0,1,1)
+
+## Part (d)
+ 
+```{r}
+fit <- q4_data %>% 
+  model(m1 = ARIMA(log(GDP) ~ pdq(1,1,1)),
+        m2 = ARIMA(log(GDP) ~ pdq(2,1,1)),
+        m3 = ARIMA(log(GDP) ~ pdq(0,1,1)),
+        search = ARIMA(log(GDP),stepwise=FALSE))
+report(fit)
+glance(fit) %>% arrange(AICc)
+```
+
+## Part (e)
+ 
+```{r}
+fit %>% forecast(h = 10) %>% 
+  autoplot(q4_data)
+```
+ 
+## Part (f)
+
+The confidence interval band get larger as the the interval is increased, but i would say that the using a 10 year forecast seems reasonable, but a 7 or 8 year forecast would be better suited for the problem. 
+
+# Question 5
+
+```{r}
+q5_data <- hh_budget %>% filter(Country == "Australia")  # replace COUNTRYNAME
+```
+
+## Part (a)
+
+```{r}
+q5_data %>% gg_tsdisplay(Debt,"partial")
+```
+
+## Part (b)
+```{r}
+q5_data %>% gg_tsdisplay(difference(Debt),"partial")
+```
+## Part (c)
+ 
+ARIMA(2,1,2)
+ARIMA(2,1,1)
+ARIMA(3,1,1)
+ARIMA(1,1,1) This is the one
+This one was difficult to determine, but I see only one significant PACF value and one significant ACF value with tail off in each respectively, which leads me to believe that there this has a MA component as well as an AR component of around the same value of one. 
+
+## Part (d)
+
+```{r}
+fit2 <- q5_data %>% 
+  model(m1 = ARIMA(Debt ~ pdq(2,1,2)),
+        m2 = ARIMA(Debt ~ pdq(2,1,1)),
+        m3 = ARIMA(Debt ~ pdq(3,1,1)),
+        m4 = ARIMA(Debt ~ pdq(1,1,1)),
+        search = ARIMA(Debt,stepwise=FALSE))
+report(fit2)
+glance(fit2) %>% arrange(AICc)
+```
+
+## Part (e)
+ 
+```{r}
+fit2 %>% forecast(h = 10) %>% 
+  autoplot(q5_data)
+```
+ 
+## Part (f)
+
+I think that about a 10 year forecast might be too large to be useful since the confidence bands are too large and grow exponentially. Therefore I would say that a 5 year forecast seems reasonable to use for this problem. 
