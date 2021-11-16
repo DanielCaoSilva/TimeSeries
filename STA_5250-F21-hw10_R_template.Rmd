@@ -1,0 +1,135 @@
+---
+title: "STA 5250 Homework 10"
+author: "Daniel Silva"
+date: "Due 11/16/21"
+output:
+    pdf_document:
+      df_print: kable
+---
+
+```{r global_options, include=FALSE}
+# these are some optional settings that will change how some features look
+# you do not need to change them.
+knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
+```
+
+
+### Loading Relevant Packages
+
+```{r}
+# load any relevant packages here, if necessary
+library(fpp3)
+library(astsa)
+```
+
+
+# Question 3
+
+
+```{r}
+q5_data <- hh_budget %>% filter(Country == "Australia")
+
+q5_data %>% gg_tsdisplay(difference(Debt),"partial")
+
+fit3 <- q5_data %>% 
+  model(m1 = ARIMA(Debt ~ pdq(2,1,2)),
+        m2 = ARIMA(Debt ~ pdq(2,1,1)),
+        m3 = ARIMA(Debt ~ pdq(3,1,1)),
+        m4 = ARIMA(Debt ~ pdq(1,1,1)),
+        search = ARIMA(Debt,stepwise=FALSE,approximation = FALSE))
+
+glance(fit3) %>% arrange(AICc)
+
+fit3 %>% select(search) %>% gg_tsresiduals()
+
+augment(fit3) %>% 
+    features(.innov,ljung_box)
+
+```
+
+## auto = ARIMA(1,1,0) w/drift
+
+(i) Yes, the residuals look like they have mean zero.
+
+(ii) Yes, the residuals seem like they have close to constant variance.
+
+(iii) There is no significant autocorrelation among the residuals.
+
+(iv) Yes, it look normally distributed
+
+(v) Yes, 0.96 is high enough to pass the Ljung-Box test.
+
+
+# Question 4
+
+```{r}
+unemprate_ts <-as_tsibble(UnempRate)
+
+unemprate_ts %>% gg_tsdisplay(difference(value,12),"partial",lag_max = 65)
+
+fit4 <- unemprate_ts %>% 
+  model(m1 = ARIMA(value ~ pdq(2,0,1)+PDQ(4,1,0),order_constraint = P>3),
+        m2 = ARIMA(value ~ pdq(2,0,2)+PDQ(4,1,0),order_constraint = P>3),
+        m3 = ARIMA(value ~ pdq(3,0,0)+PDQ(4,1,0),order_constraint = P>3),
+        search = ARIMA(value,stepwise=FALSE,approximation = FALSE))
+
+fit4$search
+
+glance(fit3) %>% arrange(AICc)
+
+fit3 %>% select(search) %>% gg_tsresiduals()
+
+augment(fit3) %>% 
+    features(.innov,ljung_box)
+```
+
+## auto = ARIMA
+
+
+# Question 5
+
+## Part (a)
+
+
+
+## Part (b)
+
+
+
+## Part (c)
+
+
+
+
+
+
+
+
+# Question 6
+
+## Part (a)
+
+
+
+## Part (b)
+
+
+
+## Part (c)
+
+
+
+## Part (d)
+
+
+
+
+
+
+
+
+
+
+
+
+
