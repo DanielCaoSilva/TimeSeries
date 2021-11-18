@@ -44,20 +44,30 @@ buoy_ts <- build_tsibble(
 )
 
 # Count all the missing data and make them NA values
+# Mauricio Missing data points ----
 buoy_gaps <- buoy_ts %>%
   count_gaps(.full = TRUE)
 buoy_ts <- buoy_ts %>% fill_gaps()
 
-#Try fixing missing data using interpolate
+#Try fixing missing data using interpolate from ARIMA model---
 buoy_fill <- buoy_ts %>% 
-  model(ARIMA(V9)) %>%
+  model(ARIMA(V9 ~ pdq(4,1,0) + PDQ(2,0,0), approximation = FALSE)) %>%
   interpolate(buoy_ts)
 
-#Test Plot the data 
-buoy_ts %>% autoplot()
-buoy_ts %>% gg_tsdisplay(V9,plot_type="partial")
+# Box - Cox Transformation and Test Michael ----
 
-#STL decomp 
+
+#Unit Root Test - KSS Yodd ----
+
+
+#Test Plot the data ----
+buoy_ts %>% autoplot()
+buoy_ts %>% gg_tsdisplay(V9,plot_type="partial",lag_max = 100)
+buoy_ts %>% gg_tsdisplay(difference(V9),plot_type="partial",lag_max = 17)
+buoy_ts %>% gg_tsdisplay(difference(V9,16),plot_type="partial",lag_max = 100)
+
+
+#STL decomp (Needs work) Daniel ----
 buoy_fill %>%
   model(
     STL(V9 ~ trend(window = 7)+
@@ -67,19 +77,40 @@ buoy_fill %>%
   autoplot()
   
 
-# Model Fitting 
-fit <- buoy_fill %>% model(auto = ARIMA(V9))
-#                          m1 = ARIMA(log(V9) ~ 0 + pdq(1,1,0) +PDQ(2,0,2))+season("2") )
-report(fit)
+# Model Fitting ----
+fit <- buoy_fill %>% model(auto = ARIMA(V9),
+                          m1 = ARIMA(V9 ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
+                          m2 = ARIMA(V9 ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
+                          m3 = ARIMA(V9 ~ 0 + pdq(2,0,0) +PDQ(0,1,5,period = 16),
+                                     order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
+                          m4 = ARIMA(V9 ~ 0 + pdq() + PDQ(,period = 16))
+                          )
+
+# Residual Analysis----
+fit %>% select(m3) %>% gg_tsresiduals(lag = 50)
+
+augment(fit) %>%
+  filter(.model == "m3") %>% 
+  features(.innov,ljung_box,lag=50,dof=7)
+
+
+# Forecast ----
+fit %>% forecast(h="2 years") %>% autoplot(buoy_fill)
 glance(fit)
 
 
-# Forecast 
-fit %>% forecast(h=1000) %>% autoplot(buoy_fill)
-report(fit)
 
-
-
+########### Saved report(fit)
+# Series: V9 
+# Model: ARIMA(4,1,0)(2,0,0)[2] 
+# 
+# Coefficients:
+#   ar1      ar2     ar3      ar4    sar1    sar2
+# -0.2721  -0.1224  0.0637  -0.0759  0.1192  0.1390
+# s.e.   0.0075   0.0327  0.0125   0.0173  0.0325  0.0195
+# 
+# sigma^2 estimated as 0.003467:  log likelihood=24831.08
+# AIC=-49648.16   AICc=-49648.15   BIC=-49593.74
 
 
 
