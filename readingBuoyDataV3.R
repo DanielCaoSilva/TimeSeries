@@ -1,3 +1,4 @@
+# Import libraries ----
 library(astsa)
 library(fpp3)
 library(readr)
@@ -6,7 +7,10 @@ library(lubridate)
 #wav_data <-read.csv("https://www.ndbc.noaa.gov/data/realtime2/46268.txt")
 #b_data <- read.table("https://www.ndbc.noaa.gov/data/realtime2/46268.txt")
 #b_data <- read.table("https://www.ndbc.noaa.gov/data/realtime2/46268.txt")
+
+# Load Data ----
 b_data <- read.table("https://www.ndbc.noaa.gov/view_text_file.php?filename=46221h2020.txt.gz&dir=data/historical/stdmet/")
+b_data19 <- read.table("https://www.ndbc.noaa.gov/view_text_file.php?filename=46221h2019.txt.gz&dir=data/historical/stdmet/")
 #V1   2  3  4  5   6    7   8     9     10    11  12     13   14    15    16    17  18    19
 #YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS PTDY  TIDE
 #yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi  hPa    ft
@@ -15,36 +19,43 @@ b_data <- read.table("https://www.ndbc.noaa.gov/view_text_file.php?filename=4622
 #Format the dates using a Date Class
 b_date <- paste(b_data[,1],"-",b_data[,2],"-",b_data[,3]," ",b_data[,4],":",b_data[,5]) 
 b_date <- ymd_hm(b_date,tz = "UTC")
+b_date19 <- paste(b_data19[,1],"-",b_data19[,2],"-",b_data19[,3]," ",b_data19[,4],":",b_data19[,5]) 
+b_date19 <- ymd_hm(b_date19,tz = "UTC")
 
 #7693 to 7694 is when the change of intervals happens 17:26 to 19:53
 #15416 to 15417 is when the change of intervals happens 20:23 to 22:26
-b_date <- b_date
-head(b_date)
-
 b_data %>% select(V9) -> data
 data$time <- b_date
+b_data19 %>% select(V9) -> data19
+data19$time <- b_date19
 
 #Attempt to fix the uneven time intervals as select times
 testies<-data$time[7694:15416]
 fixedTimes <- testies + minutes(3)
 data$time[7694:15416] <- fixedTimes
 
+testies19<-data19$time[1:9906]
+fixedTimes19 <- testies19 - minutes(4)
+data19$time[1:9906] <- fixedTimes19
 
 which((data$time[2:16184]-data$time[1:16183])>30)
+
+newData <- rbind(data19,data)
 
 # Turn into a tsibble 
 # using build_tsibble instead of as_tsibble to specifiy the interval  
 buoy_ts <- build_tsibble(
-  data,
-  key = dplyr::starts_with("2020-01-01 00:26:00"),
+  newData,
+  key = dplyr::starts_with("2019-01-01 00:26:00"),
   index = time,
   ordered = TRUE,
   interval = new_interval(minute = 30),
   validate = TRUE
 )
 
+
+# Missing data points Maurico ----
 # Count all the missing data and make them NA values
-# Mauricio Missing data points ----
 buoy_gaps <- buoy_ts %>%
   count_gaps(.full = TRUE)
 buoy_ts <- buoy_ts %>% fill_gaps()
@@ -68,35 +79,69 @@ buoy_ts %>% gg_tsdisplay(difference(V9,16),plot_type="partial",lag_max = 100)
 
 
 #STL decomp (Needs work) Daniel ----
+common_periods(buoy_fill)
 buoy_fill %>%
   model(
-    STL(V9 ~ trend(window = 7)+
+    STL(V9 ~ season(period = 17532)+       # 1 year
+                   season(period = 1344)+  # 4 months
+                   season(period = 336)+   # weekly
+                   season(period = 48)+    # daily
+                   season(period = 2),     # hourly
+        robust = TRUE)
+  ) %>%
+  components() %>%
+  autoplot() + labs(x = "Observation")
+
+buoy_fill %>%
+  model(
+    STL(V9 ~ trend(window = 21) +
           season(window = "periodic"),
-        robust = TRUE)) %>%
-  components()%>%
-  autoplot()
+        robust = TRUE)
+  ) %>%
+  components() %>%
+  autoplot() + labs(x = "Observation")
+
   
 
 # Model Fitting ----
+# SARIMA model fit 
 fit <- buoy_fill %>% model(auto = ARIMA(V9),
                           m1 = ARIMA(V9 ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
                           m2 = ARIMA(V9 ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
                           m3 = ARIMA(V9 ~ 0 + pdq(2,0,0) +PDQ(0,1,5,period = 16),
                                      order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
-                          m4 = ARIMA(V9 ~ 0 + pdq() + PDQ(,period = 16))
-                          )
+                          m4 = ARIMA(V9 ~ 0 + pdq() + PDQ(,period = 16)),
+)
+# Dynamic Harmonic Regression fit
+# Combines: Fourier terms for capturing seasonality with ARIMA errors capturing other dynamics 
+# Need to know what the multiple seasonal periods are in order to fit
+fitDHR <- model(buoy_fill,
+             mk1 = ARIMA(sqrt(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                               fourier(period = "day", K = 3)+
+                               fourier(period = "hour", K = 1)+
+                               fourier(period = "week", K = 1)+
+                               fourier(period = "month", K = 2)
+                             ),
 
-# Residual Analysis----
+)
+
+
+# Residual Analysis ----
 fit %>% select(m3) %>% gg_tsresiduals(lag = 50)
+fitDHR %>% gg_tsresiduals()
 
 augment(fit) %>%
   filter(.model == "m3") %>% 
   features(.innov,ljung_box,lag=50,dof=7)
+augment(fitDHR) %>%
+  features(.innov,ljung_box,lag=50)
 
 
 # Forecast ----
 fit %>% forecast(h="2 years") %>% autoplot(buoy_fill)
 glance(fit)
+fitDHR %>% forecast(h = "3 months") %>% autoplot(buoy_fill)
+glance(fitDHR)
 
 
 
