@@ -88,14 +88,18 @@ buoy_ts %>% gg_tsdisplay(difference(V9,16),plot_type="partial",lag_max = 100)
 
 #STL decomp (Needs work) Daniel ----
 # Need to determine seaonal period(s)
+lun_year <- 39000/30
+lun_month <- (12*60+44+29*24*60)/30
+lun_day <- (24+50/60)*2
+sun_day <- 48
 common_periods(buoy_fill)
 buoy_fill %>%
   model(
-    STL(log(V9) ~ season(period = 39000/30)+       # 1 year
-          season(period = (12*60+44+29*24*60)/30)+  # months
+    STL(log(V9) ~ season(period = lun_year)+       # 1 year
+          season(period = lun_month)+  # months
           #season(period = 48*7)+   # weekly
-          season(period = (24+50/60)*2)+    # lunar daily
-          season(period = 48),     # normal daily
+          season(period = lun_day)+    # lunar daily
+          season(period = sun_day),     # normal daily
         robust = TRUE)
   ) %>%
   components() %>%
@@ -126,33 +130,80 @@ fit <- buoy_fill %>% model(auto = ARIMA(V9),
 # Need to know what the multiple seasonal periods are in order to fit
 fitDHR <- model(buoy_fill,
                 mk1 = ARIMA(V9 ~ PDQ(0,0,0)+pdq(d=0)+
-                              fourier(period = "day", K = 3)+
-                              fourier(period = "hour", K = 1)+
-                              fourier(period = "week", K = 1)+
-                              fourier(period = "month", K = 2)
+                              fourier(period = lun_year, K = 3)+
+                              fourier(period = lun_month, K = 1)+
+                              fourier(period = lun_day, K = 1)+
+                              fourier(period = sun_day, K = 2)
                 ),
 )
 
-model(buoy_fill,ARIMA(~PDQ(0,0,0)+pdq(d=0)+
-        fourier(period = "day",K=1)+
-        fourier(period = "week",K=1)))
 
-
-kSelectors <- function(data_ts,period1,period2,d_value,k_range){
-  fits <- rep(NA)
-  aiccs <- rep(NA,k_range*k_range)
-  for (k1 in 1:k_range) {
-    for (k2 in 1:k_range) {
-      fits<-append(model(data_ts,ARIMA(~PDQ(0,0,0)+pdq(d=d_value)+
-              fourier(period = period1,K=k1)+
-              fourier(period = period2,K=k2))))
+kSelectors <- function(data_ts,period1,period2,period3,period4,d_value,k_start,k_range){
+  p1 <- period1
+  p2 <- period2
+  p3 <- period3
+  p4 <- period4
+  #k_list <- list(k1s = rep(NA), k2s = rep(NA), k3s = rep(NA), k4s = rep(NA))
+  #aiccs <- list(rep(NA,k_range),rep(NA,k_range),rep(NA,k_range),rep(NA,k_range))
+  tempSmallest <- 9999999
+  smallestKvals <- rep(NA,4)
+  modelIndex <- 0
+  for (k1 in k_start:k_range) {
+    print(k1)
+    for (k2 in k_start:k_range) {
+      #fprintf("k2 = %i\n",k2)
+      for (k3 in k_start:k_range) {
+        #fprintf("k3 = %i\n",k3)
+        for (k4 in k_start:k_range) {
+          ######
+          #fprintf("k4 = %i\n",k4)
+          #k_list[[k1]][[k2]][[k3]][[k4]] <- data_ts %>%
+          fits <- data_ts %>% 
+            model(
+              m1 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month
+                           fourier(period = p1, K = k1) + 
+                           fourier(period = p2, K = k2)),
+              m2 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day
+                           fourier(period = p1, K = k1) + 
+                           fourier(period = p2, K = k2) + 
+                           fourier(period = p3, K = k3)),
+              m3 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month + sun_day
+                           fourier(period = p1, K = k1) + 
+                           fourier(period = p2, K = k2) + 
+                           fourier(period = p4, K = k4)),
+              m4 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day + sun_day
+                           fourier(period = p1, K = k1) + 
+                           fourier(period = p2, K = k2) + 
+                           fourier(period = p3, K = k3) +
+                           fourier(period = p4, K = k4)))
+          #glance(fits)$AICc
+          #aiccs[[k1]][[k2]][[k3]][[k4]] <- glance(fits)$AICc
+          checkSmallest<-min(glance(fits)$AICc)
+          whichModel <- which.min(glance(fits)$AICc)
+          if(checkSmallest < tempSmallest){
+            tempSmallest <- checkSmallest # smallest AICc value
+            smallestKvals <- c(k1,k2,k3,k4) # k values associated with smallest aicc
+            modelIndex <- whichModel #Which model gave the smallest AICc from the fit
+          }
+          #####
+        }
+      }
     }
   }
-  for(i in 1:k_range*k_range){
-    # get aicc values of each fit in fits
-    fitDHR[[1]][[1]][["fit"]][["model"]][["aicc"]]
-  }
+  #More stuff
+  return_list <- list(smallestKvals,modelIndex,tempSmallest)
+  return(return_list)
 }
+bestKvals <- kSelectors(buoy_fill,
+           period1 = lun_year,
+           period2 = lun_month,
+           period3 = lun_day,
+           period4 = sun_day,
+           d_value = 0,
+           k_start = 1,
+           k_range = 3)
+
+
 
 
 # Residual Analysis ----
