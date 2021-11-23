@@ -34,6 +34,8 @@ data$time <- b_date
 b_data19 %>% select(V9) -> data19
 data19$time <- b_date19
 
+
+
 # Attempt to fix the uneven time intervals as select times ----
 testies<-data$time[7694:15416]
 fixedTimes <- testies + minutes(3)
@@ -47,6 +49,8 @@ which((data$time[2:16184]-data$time[1:16183])>30)
 
 newData <- rbind(data19,data)
 
+
+
 # Turn into a tsibble ----
 # using build_tsibble instead of as_tsibble to specify the interval  
 buoy_ts <- build_tsibble(
@@ -59,25 +63,37 @@ buoy_ts <- build_tsibble(
 )
 
 
+
+
 # Address additional missing data points (Maurico) ----
 # TODO
 
 
-# Count all the missing data and make them NA values
+
+
+# Count all the missing data and make them NA values ----
 buoy_gaps <- buoy_ts %>%
   count_gaps(.full = TRUE)
 buoy_ts <- buoy_ts %>% fill_gaps()
 
-#Try fixing missing data using interpolate from ARIMA model---
+
+
+#Try fixing missing data using interpolate from ARIMA model----
 buoy_fill <- buoy_ts %>% 
   model(ARIMA(V9 ~ pdq(4,1,0) + PDQ(2,0,0), approximation = FALSE)) %>%
   interpolate(buoy_ts)
 
+
+
 # Box - Cox Transformation and Test (Michael) ----
 # TODO
 
+
+
 # Unit Root Test - KSS (Yodd) ----
 # TODO
+
+
 
 # Test Plot the data ----
 buoy_ts %>% autoplot()
@@ -86,7 +102,9 @@ buoy_ts %>% gg_tsdisplay(difference(V9),plot_type="partial",lag_max = 17)
 buoy_ts %>% gg_tsdisplay(difference(V9,16),plot_type="partial",lag_max = 100)
 
 
-#STL decomp (Needs work) Daniel ----
+
+
+#STL decomp ----
 # Need to determine seaonal period(s)
 lun_year <- 39000/30
 lun_month <- (12*60+44+29*24*60)/30
@@ -105,19 +123,11 @@ buoy_fill %>%
   components() %>%
   autoplot() + labs(x = "Observation")
 
-buoy_fill %>%
-  model(
-    STL(V9 ~ trend(window = 21) +
-          season(window = "periodic"),
-        robust = TRUE)
-  ) %>%
-  components() %>%
-  autoplot() + labs(x = "Observation")
 
 
 
 # Model Fitting ----
-# SARIMA model fit 
+# SARIMA model fit ----
 fit <- buoy_fill %>% model(auto = ARIMA(V9),
                            m1 = ARIMA(V9 ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
                            m2 = ARIMA(V9 ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
@@ -125,11 +135,11 @@ fit <- buoy_fill %>% model(auto = ARIMA(V9),
                                       order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
                            m4 = ARIMA(V9 ~ 0 + pdq() + PDQ(,period = 16)),
 )
-# Dynamic Harmonic Regression fit
+# Dynamic Harmonic Regression fit ----
 # Combines: Fourier terms for capturing seasonality with ARIMA errors capturing other dynamics 
 # Need to know what the multiple seasonal periods are in order to fit
 fitDHR <- model(buoy_fill,
-                mk1 = ARIMA(V9 ~ PDQ(0,0,0)+pdq(d=0)+
+                mk1 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
                               fourier(period = lun_year, K = 3)+
                               fourier(period = lun_month, K = 1)+
                               fourier(period = lun_day, K = 1)+
@@ -137,8 +147,15 @@ fitDHR <- model(buoy_fill,
                 ),
 )
 
-
-kSelectors <- function(data_ts,period1,period2,period3,period4,d_value,k_start,k_range){
+# Function for selection the optimal values of K for DHR+ARIMA model ----
+kSelectors <- function(data_ts,
+                       period1,
+                       period2,
+                       period3,
+                       period4,
+                       d_value,
+                       k_start,
+                       k_range){
   p1 <- period1
   p2 <- period2
   p3 <- period3
@@ -151,49 +168,48 @@ kSelectors <- function(data_ts,period1,period2,period3,period4,d_value,k_start,k
   for (k1 in k_start:k_range) {
     print(k1)
     for (k2 in k_start:k_range) {
-      #fprintf("k2 = %i\n",k2)
+      print(k2)
       for (k3 in k_start:k_range) {
-        #fprintf("k3 = %i\n",k3)
         for (k4 in k_start:k_range) {
-          ######
-          #fprintf("k4 = %i\n",k4)
-          #k_list[[k1]][[k2]][[k3]][[k4]] <- data_ts %>%
+          # Tests all the possible models using specific periods for DHR
           fits <- data_ts %>% 
             model(
-              m1 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month
+              m1 = ARIMA(log(V9) ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month
                            fourier(period = p1, K = k1) + 
                            fourier(period = p2, K = k2)),
-              m2 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day
+              m2 = ARIMA(log(V9) ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day
                            fourier(period = p1, K = k1) + 
                            fourier(period = p2, K = k2) + 
                            fourier(period = p3, K = k3)),
-              m3 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month + sun_day
+              m3 = ARIMA(log(V9) ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month + sun_day
                            fourier(period = p1, K = k1) + 
                            fourier(period = p2, K = k2) + 
                            fourier(period = p4, K = k4)),
-              m4 = ARIMA(V9 ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day + sun_day
+              m4 = ARIMA(log(V9) ~ PDQ(0,0,0) + pdq(d=d_value) + #lun_year/month/day + sun_day
                            fourier(period = p1, K = k1) + 
                            fourier(period = p2, K = k2) + 
                            fourier(period = p3, K = k3) +
                            fourier(period = p4, K = k4)))
-          #glance(fits)$AICc
-          #aiccs[[k1]][[k2]][[k3]][[k4]] <- glance(fits)$AICc
+          
+          # Takes the smallest AICc values of the associated model and saves it
           checkSmallest<-min(glance(fits)$AICc)
           whichModel <- which.min(glance(fits)$AICc)
           if(checkSmallest < tempSmallest){
-            tempSmallest <- checkSmallest # smallest AICc value
+            tempSmallest <- checkSmallest   # smallest AICc value
             smallestKvals <- c(k1,k2,k3,k4) # k values associated with smallest aicc
-            modelIndex <- whichModel #Which model gave the smallest AICc from the fit
+            modelIndex <- whichModel        # Which model gave the smallest AICc from the fit
           }
           #####
         }
       }
     }
   }
-  #More stuff
+  # Return values in a list
   return_list <- list(smallestKvals,modelIndex,tempSmallest)
   return(return_list)
 }
+
+# Run the kSelectors function and assign the best fit to a new model to do analysis
 bestKvals <- kSelectors(buoy_fill,
            period1 = lun_year,
            period2 = lun_month,
@@ -202,6 +218,17 @@ bestKvals <- kSelectors(buoy_fill,
            d_value = 0,
            k_start = 1,
            k_range = 3)
+
+#bestKvals[[1]]
+
+fitDHR2 <- model(buoy_fill,
+                mk1 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                              fourier(period = lun_year, K = 3)+
+                              fourier(period = lun_month, K = 1)+
+                              fourier(period = lun_day, K = 1)+
+                              fourier(period = sun_day, K = 2)
+                ),
+)
 
 
 
@@ -216,8 +243,11 @@ augment(fit) %>%
 augment(fitDHR) %>%
   features(.innov,ljung_box,lag=50)
 
+
+
 # Training with Cross Validation ----
 # TODO
+
 
 
 
@@ -226,6 +256,8 @@ fit %>% forecast(h = "2 years") %>% autoplot(buoy_fill)
 glance(fit)
 fitDHR %>% forecast(h = "3 months") %>% autoplot(buoy_fill)
 glance(fitDHR)
+
+
 
 # Error Analysis ----
 # TODO
@@ -248,3 +280,7 @@ glance(fitDHR)
 # 
 # sigma^2 estimated as 0.003467:  log likelihood=24831.08
 # AIC=-49648.16   AICc=-49648.15   BIC=-49593.74
+
+
+
+
