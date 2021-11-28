@@ -225,8 +225,12 @@ train_fitDHR %>% select(mk1) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk2) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk3) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk4) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m2) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m4) %>% gg_tsresiduals(lag = 50)
 
 augment(train_fitDHR) %>%
+  features(.innov,ljung_box,lag=50)
+augment(sarima_fit) %>%
   features(.innov,ljung_box,lag=50)
 
 #RMSE
