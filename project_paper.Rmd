@@ -12,7 +12,7 @@ library(astsa)
 library(fpp3)
 library(readr)
 library(lubridate)
-knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
+
 ```
 
 # Data Cleaning
@@ -82,7 +82,16 @@ buoy_fill <- buoy_ts %>%
   model(ARIMA(V9 ~ pdq(4,1,0) + PDQ(2,0,0), approximation = FALSE)) %>%
   interpolate(buoy_ts)
 ```
-Comments on our data cleaning process.
+
+## Comments on our data cleaning process.
+
+The data was pulled from the ndbc.noaa.gov website. There were many buoy locations to choose from where we could select one to pull from. We ended up getting the data by reading a url that contained a text file extension. From this extension we were able to read it into a table. Since our focus was on forecasting significant wave height we selected that column of data. The time intervals at first seemed to come in every 30 minutes.
+
+Our next task was to organize the dates and times associated with each data point. Since the data was organized in a way that the year, month, day, hour, minute, and seconds were each individual columns, we had to use concatenation to turn them into one column. Using a date class, we were able to create a new data set with each of the dates as a date object to be matched with the corresponding data points.
+
+Now that we had our time series data, we turned it into a tsibble object, using build_tsibble to specify the time intervals more clearly. We also took note that some of the intervals were not perfectly matched up (i.e. not exactly 30 min intervals at some points) This was most likely due to the actual buoy recording was not perfect. This was remedied by adding or subtracting 3 or 4 minutes to the times at certain sections of the data. 
+
+Next, we still had a few large gaps in our data due to missing data from the buoy. We using an ARIMA interpolation to fill in those missing gaps
 
 # Analysis
 
@@ -126,7 +135,7 @@ The data appears to have some non-constant variance with wildly varying magnitud
 
 ## Differencing
 
-Once we determined that a log transformation was needed, we checked if the data needs to be diffferenced.
+Once we determined that a log transformation was needed, we checked if the data needs to be differenced.
 
 ```{r, echo=FALSE}
 buoy_train %>% gg_tsdisplay(log(V9),plot_type = "partial")
@@ -153,6 +162,17 @@ buoy_fill %>%
           #season(period = 48*7)+   # weekly
           season(period = lun_day)+    # lunar daily
           season(period = sun_day),     # normal daily
+        robust = TRUE)
+  ) %>%
+  components() %>%
+  autoplot() + labs(x = "Observation")
+buoy_fill %>%
+  model(
+    STL(log(V9) ~ #season(period = lun_year)+       # 1 year
+          season(period = lun_year),  # months
+          #season(period = 48*7)+   # weekly
+          #season(period = lun_day)+    # lunar daily
+          #season(period = sun_day),     # normal daily
         robust = TRUE)
   ) %>%
   components() %>%
@@ -188,10 +208,11 @@ glance(train_fitDHR)
 ```{r}
 # SARIMA model fit ----
 sarima_fit <- buoy_train %>% model(auto = ARIMA(V9),
-                           m1 = ARIMA(V9 ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
-                           m2 = ARIMA(V9 ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
-                           m3 = ARIMA(V9 ~ 0 + pdq(2,1,0) +PDQ(0,1,5,period = 16),
-                                      order_constraint = p+q+P+Q<=10&(constant+d+D<=3)))
+                           m1 = ARIMA(log(V9) ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
+                           m2 = ARIMA(log(V9) ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
+                           m3 = ARIMA(log(V9) ~ 0 + pdq(2,1,0) +PDQ(0,1,5,period = 16),
+                                      order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
+                           m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
 
 glance(sarima_fit)
 ```
