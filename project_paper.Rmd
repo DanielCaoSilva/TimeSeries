@@ -12,7 +12,7 @@ library(astsa)
 library(fpp3)
 library(readr)
 library(lubridate)
-
+knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
 ```
 
 # Data Cleaning
