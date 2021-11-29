@@ -14,6 +14,8 @@ library(readr)
 library(lubridate)
 knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
 ```
+# Abstract
+This particular data set comes from the Santa Monica Bay buoy collected by the National Data Buoy Center. Beginning with extracting the data from the ndbc.noaa.gov website, we data cleaned our data set and modified it to fit the desired intervals of 30 minutes since the time intervals were uneven. The objective of testing this data set is to forecast the significant wave height in meters which is calculated as the highest one-third of all the wave heights during the 20 minute sampling period. Our desired forecast model should be able to forecast six hours, one week, and 3 months into the future. Our first attempt was to design a SARIMA model to find the best fit. However, since we suspected there was multiple seasonalities, we proceeded with the Dynammic Harmonic Regression to further expand our search. Although the DHR was more successful than SARIMA fit, none of our models performed as desired. Hence, we concluded that we should select different predictors such as wind speed or wind direction to indicate when they are correlated with the significant wave height at certain values of h for future forcasting. 
 
 # Data Cleaning
 ```{r, echo=FALSE}
@@ -142,9 +144,13 @@ buoy_train %>% gg_tsdisplay(log(V9),plot_type = "partial")
 
 buoy_train %>% gg_tsdisplay(difference(log(V9)),plot_type = "partial")
 
+# Unit Root Test
+buoy_train %>% features(difference(log(V9)), unitroot_kpss) 
 ```
 
 The series appears level overall but the lags present in the ACF plot exhibit a very slow decay which indicates the data is nonstationary and should probably be differenced. Taking a single nonseasonal difference appears to have made the data stationary since there is no longer any slow decay in the ACF plot. There are also now lags with clear cutoffs and tailing behavior which is typically helpful in the model fitting process. If we choose to use a typical SARIMA model fitting, we now know we will need to use a model that has a nonseasonal difference order of $d=1$.
+
+In order to determine if another differencing is required, we performed a unit root test to test the stationarity of the nonseasonal difference(log(V9)). Since the p-value was larger than $0.05$, it suggests that no further differencing is required. Hence, we only performed one nonseasonal difference after the log transformation.  
 
 #  STL Decomposition
 
@@ -218,7 +224,9 @@ sarima_fit <- buoy_train %>% model(auto = ARIMA(log(V9)),
 
 glance(sarima_fit) %>% arrange(AICc)
 ```
+In order to compare the AICc's values across ARIMA models, we kept the differences the same where $d=1$ and $D=0$ since we only performed one nonseasonal difference. After observing the PACF for the nonseasonal AR component, we tested different values for p such as 5, 4, and 2 because 
 
+Comparing all four SARIMA models, m4 came to be the best model obtaining the lowest AICc value of -85771.90 with SARIMA model ARIMA(1,1,3)(1,0,1)[16] where the seasonality is 16 time unit intervals of 30 minutes each (every 8 hours). 
 
 # Residual Analysis
 
@@ -303,7 +311,7 @@ buoy_TestFC_long %>% autoplot(buoy_fill %>% slice(n()- 5300:0))  +
   guides(colour = guide_legend(title = "Forecast"))
 ```
 
-Once we identified the best model fit to the training set, we tested the model's ability to forecast the training set. We forecasted a short term forecast (6 hours), mid-term forecast (1 week), and long-term forecast (3 month). In these plots, we only included about a week of data leading up to the forecat to give us a better scale for comparing the forecast against the testing set. The short is difficult to analyze since there are so few observations in the forecasts. The confidence intervals appear to contain all of the observations which is problematic. We expect to have on 95% of the data points in the confidence interval. The midterm and long term forecast have the same issue with the confidence intervals but they do appear to be giving a reasonable forecast of the wave height we would expect to see.
+Once we identified the best model fit to the training set, we tested the model's ability to forecast the training set. We forecasted a short-term forecast (6 hours), mid-term forecast (1 week), and long-term forecast (3 month). In these plots, we only included about a week of data leading up to the forecast to give us a better scale for comparing the forecast against the testing set. The short-term is difficult to analyze since there are so few observations in the forecasts. The confidence intervals appear to contain all of the observations which is problematic. We expect to have on 95% of the data points in the confidence interval. The mid-term and long-term forecast have the same issue with the confidence intervals but they do appear to be giving a reasonable forecast of the wave height we would expect to see.
 
 # Forecasting 
 ```{r, echo=FALSE}
@@ -335,7 +343,7 @@ buoy_FC_long %>% autoplot(buoy_fill %>% slice(n()- 6000:0))  +
   guides(colour = guide_legend(title = "Forecast"))
 ```
 
-For our actual forecast, we fit the model to the full data set including both the training and test sets and then forecasted into the future. The short-term appears to be reasonable only up to a couple of hours and the mid-term forecast appears to be reasonable for a few days. The problem is that their cofindence bands start wide and stay wide so we really can't narrow down a point where the forecast becomes unreasonable. The long-term forecasts appears to really become unreliable after the the first week or so. Overall, this model doesn't seem to provide an accurate forecast with reasonal confindence intervals.
+For our actual forecast, we fit the model to the full data set including both the training and test sets and then forecasted into the future. The short-term appears to be reasonable only up to a couple of hours and the mid-term forecast appears to be reasonable for a few days. The problem is that their confidence bands start wide and stay wide so we really can't narrow down a point where the forecast becomes unreasonable. The long-term forecasts appears to really become unreliable after the the first week or so. Overall, this model doesn't seem to provide an accurate forecast with reasonable confidence intervals.
 
 # Alternatives
 
