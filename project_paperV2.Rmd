@@ -141,6 +141,7 @@ Once we determined that a log transformation was needed, we checked if the data 
 buoy_train %>% gg_tsdisplay(log(V9),plot_type = "partial")
 
 buoy_train %>% gg_tsdisplay(difference(log(V9)),plot_type = "partial")
+
 ```
 
 The series appears level overall but the lags present in the ACF plot exhibit a very slow decay which indicates the data is nonstationary and should probably be differenced. Taking a single nonseasonal difference appears to have made the data stationary since there is no longer any slow decay in the ACF plot. There are also now lags with clear cutoffs and tailing behavior which is typically helpful in the model fitting process. If we choose to use a typical SARIMA model fitting, we now know we will need to use a model that has a nonseasonal difference order of $d=1$.
@@ -208,10 +209,10 @@ glance(train_fitDHR)
 
 ```{r, echo=FALSE}
 # SARIMA model fit ----
-sarima_fit <- buoy_train %>% model(auto = ARIMA(V9),
+sarima_fit <- buoy_train %>% model(auto = ARIMA(log(V9)),
                            m1 = ARIMA(log(V9) ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
                            m2 = ARIMA(log(V9) ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
-                           m3 = ARIMA(log(V9) ~ 0 + pdq(2,1,0) +PDQ(0,1,5,period = 16),
+                           m3 = ARIMA(log(V9) ~ 0 + pdq(2,1,0) +PDQ(0,0,5,period = 16),
                                       order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
                            m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
 
