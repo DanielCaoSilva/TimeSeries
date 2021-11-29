@@ -356,7 +356,7 @@ buoy_FC_long %>% autoplot(buoy_fill %>% slice(n()- 6000:0))  +
 
 For our actual forecast, we fit the model to the full data set including both the training and test sets and then forecasted into the future. The short-term appears to be reasonable only up to a couple of hours and the mid-term forecast appears to be reasonable for a few days. The problem is that their confidence bands start wide and stay wide so we really can't narrow down a point where the forecast becomes unreasonable. The long-term forecasts appears to really become unreliable after the the first week or so. Overall, this model doesn't seem to provide an accurate forecast with reasonable confidence intervals.
 
-# Alternatives
+# Alternative SARIMA Forecast
 
 We spent the majority of the project attempting create a forecast for this data using Dynammic Harmonic Regression. We ambitiously attempted to capture the multiple seasonalities within this data. Unfortunately, this proved to be very complicated and computationally taxing. We decided to try forecast using a SARIMA model. We were able to come up with a model that had a lower AICc than the model that the Hydman-Kandakar Algorithym suggested.
 
@@ -366,6 +366,9 @@ glance(sarima_fit)%>%arrange(AICc)
 Using this model we did a quick residual analysis.
 
 ```{r, echo=FALSE}
+sarima_fit %>% select(m1) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m2) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m3) %>% gg_tsresiduals(lag = 50)
 sarima_fit %>% select(m4) %>% gg_tsresiduals(lag = 50)
 
 augment(sarima_fit) %>%
