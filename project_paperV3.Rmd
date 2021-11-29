@@ -13,10 +13,10 @@ library(fpp3)
 library(readr)
 library(lubridate)
 library(gridExtra)
-knitr::opts_chunk$set(out.width = "50%", out.height="50%", fig.align="center", warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(out.width = "60%", out.height="60%", fig.align="center", warning=FALSE, message=FALSE)
 ```
 # Abstract
-This particular data set comes from the Santa Monica Bay buoy collected by the National Data Buoy Center. The objective of testing this data set is to forecast the significant wave height in meters which is calculated as the highest one-third of all the wave heights. Beginning with extracting the data from the ndbc.noaa.gov website, we data cleaned our data set and modified it to fit the desired intervals of 30 minutes since the time intervals were uneven. Our desired forecast model should be able to forecast six hours, one week, and 3 months into the future. Our first attempt was to design a SARIMA model to find the best fit. However, since we suspected there was multiple seasonalities, we proceeded with the Dynammic Harmonic Regression to further expand our search. Although the DHR was more successful than SARIMA fit, none of our models performed as desired. Hence, we concluded that we should select different predictors such as wind speed or wind direction to indicate when they are correlated with the significant wave height at certain values of h for future forcasting. 
+This particular data set comes from the Santa Monica Bay buoy collected by the National Data Buoy Center. The objective of testing this data set is to forecast the significant wave height in meters which is calculated as the highest one-third of all the wave heights during the 30 minute sampling period. Beginning with extracting the data from the ndbc.noaa.gov website, we data cleaned our data set and modified it to fit the desired intervals of 30 minutes since the time intervals were uneven. Our desired forecast model should be able to forecast six hours, one week, and 3 months into the future. Our first attempt was to design a SARIMA model to find the best fit. However, since we suspected there was multiple seasonalities, we proceeded with the Dynammic Harmonic Regression to further expand our search. Although the DHR was more successful than SARIMA fit, none of our models performed as desired. Hence, we concluded that we should select different predictors such as wind speed or wind direction to indicate when they are correlated with the significant wave height at certain values of h for future forcasting. 
 
 # Data Cleaning
 ```{r, echo=FALSE}
@@ -306,7 +306,7 @@ buoy_TestFC_mid <- train_fitDHR %>% select(mk4) %>% forecast(h=336)
 
 buoy_TestFC_long <- train_fitDHR %>% select(mk4) %>% forecast(h=4036)
 
-buoy_TestFC_short %>% autoplot(buoy_fill %>% head(30090) %>% tail(4070))  +
+buoy_TestFC_short %>% autoplot(buoy_fill %>% head(30150) %>% tail(100))  +
   labs(y = "Wave Hieght",
        title = "Short-Term Forecast for Substantial Wave Height") +
   guides(colour = guide_legend(title = "Forecast"))
