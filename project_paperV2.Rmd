@@ -206,7 +206,7 @@ train_fitDHR <- model(buoy_train,
 glance(train_fitDHR)
 ```
 
-```{r}
+```{r, echo=FALSE}
 # SARIMA model fit ----
 sarima_fit <- buoy_train %>% model(auto = ARIMA(V9),
                            m1 = ARIMA(log(V9) ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
