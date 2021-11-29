@@ -434,12 +434,12 @@ SARIMA_TestFC_mid <- Test_SARIMA_fit %>% forecast(h=336)
 
 SARIMA_TestFC_long <- Test_SARIMA_fit %>% forecast(h=4036)
 
-SARIMA_TestFC_short %>% autoplot(buoy_fill %>% slice(n()- 5300:0))  +
+SARIMA_TestFC_short %>% autoplot(buoy_fill %>% head(30150) %>% tail(100))  +
   labs(y = "Wave Hieght",
        title = "SARIMA Short-Term Forecast for Substantial Wave Height") +
   guides(colour = guide_legend(title = "SARIMA Forecast"))
 
-SARIMA_TestFC_mid %>% autoplot(buoy_fill %>% slice(n()- 5300:0))  +
+SARIMA_TestFC_mid %>% autoplot(buoy_fill %>% head(30450) %>% tail(4070))  +
   labs(y = "Wave Hieght",
        title = "SARIMA Mid-Term Forecast for Substantial Wave Height") +
   guides(colour = guide_legend(title = "SARIMA Forecast"))
