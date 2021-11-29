@@ -350,8 +350,65 @@ sarima_fit %>% select(m4) %>% gg_tsresiduals(lag = 50)
 
 augment(sarima_fit) %>%
   features(.innov,ljung_box,lag=50)
+
+ resauto <- residuals(sarima_fit %>% select(auto))
+  resauto <- resauto$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSauto <- sum(resauto^2)
+  MSEauto <- RSSauto/28071
+  RMSEauto <- sqrt(MSEauto)
+  
+    resm1 <- residuals(sarima_fit %>% select(m1))
+  resm1 <- resm1$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm1 <- sum(resm1^2)
+  MSEm1 <- RSSm1/28071
+  RMSEm1 <- sqrt(MSEm1)
+  
+  resm2 <- residuals(sarima_fit  %>% select(m2))
+  resm2 <- resm2$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm2 <- sum(resm2^2)
+  MSEm2 <- RSSm2/28071
+  RMSEm2 <- sqrt(MSEm2)
+  
+  resm3 <- residuals(sarima_fit  %>% select(m3))
+  resm3 <- resm3$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm3 <- sum(resm3^2)
+  MSEm3 <- RSSm3/28071
+  RMSEm3 <- sqrt(MSEm3)
+  
+  resm4 <- residuals(sarima_fit %>% select(m4))
+  resm4 <- resm4$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm4 <- sum(resm4^2)
+  MSEm4 <- RSSm4/28071
+  RMSEm4 <- sqrt(MSEm4)
+  
+  table_RMSEmmods <- c(RMSE_m1 = RMSEm1,
+                  RMSE_m2 = RMSEm2,
+                  RMSE3_m3 = RMSEm3,
+                  RMSE4_m4 = RMSEm4)
+  table_RMSEmmods
 ```
-The residuals appear to be normally distributed but there is once again an issue present in the ACF plot since there are several significant lags. 
+(i) Looking at all the count plot, the residuals from all models (mk1, mk2, mk3, mk4) are normally distributed and all have mean zero with only outlier present on each model located on the furthest right end of the plot.
+    Now observing the count plots for models auto, m1, m2, m3, m4, the residuals on all models are normally distributed, with only a few outliers apparent, which we can assume that it will not affect our forecasts.
+
+(ii) All models mk1 - mk4 appear to have constant variance, so we have nothing to be alarmed of.
+     Models auto, and m1 - m4 appear to also have constant variance, we do see evenly spaced out spikes, which could be due to seasonality in our time series.
+
+(iii) In each ACF plot for models mk1 - mk4 we have significant lags that appear at lags $h = 12, 17, 19, 38, 46, 47, 48$. Therefore, we have some significant autocorrelation that is most apparent every 6 hours.
+      In models auto and m1 - m4, their ACF plots also express the same behavior where we have several significant lags where the most common significant lags are $h = 46, 47, 48$ for all models. We do have one exception, model m3 has its most significant lags at $h = 3, 4$. Henceforth, our residuals in all our models appear to be correlated.
+
+(iv) Inspecting the AICc scores, model mk4 is the best model with the lowest AICc score of -80036.30.
+     Out of our SARIMA models, model m4 is the best with an AICc score of -79598.85.
+     
+(v) The Ljung-Box test statistics all had very small p-values for models mk1 - mk4, meaning our residuals seem to not do well in forecasting these models. However, the model(s) that faired the best were mk1 and mk2. This means that we do not have sufficient evidence to reject our alternative hypothesis, that our residuals appear to be correlated and could be improved.
+    For our SARIMA models, all models m1 - m4 have infinitecimally small numbers, therefore we can not accept our null hypothesis and therefore do not have sufficient evidence that our residuals appear to be correlated. 
+
+(iv) All RMSE values for models mk1 - mk4 were all really close within one another, however the best model with the lowest RMSE (Root Mean Squared Error) is model mk4 with an RMSE value of 0.06904804. Minimizing this value, will result in forecasts of the mean.
+    All RMSE values for models auto - m4 were also close within one another, but if we were to pick, we would choose the smallest values, which is models m4, giving an RMSE value of 0.05859700.
 
 ```{r, echo=FALSE}
 Test_SARIMA_fit <- model( buoy_train, 
