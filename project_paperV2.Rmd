@@ -12,6 +12,7 @@ library(astsa)
 library(fpp3)
 library(readr)
 library(lubridate)
+library(gridExtra)
 knitr::opts_chunk$set(out.width = "65%", out.height="65%", fig.align="center", warning=FALSE, message=FALSE)
 ```
 # Abstract
@@ -156,7 +157,7 @@ In order to determine if another differencing is required, we performed a unit r
 
 ```{r, echo=FALSE}
 #STL decomp ----
-# Need to determine seaonal period(s)
+# Need to determine seasonal period(s)
 lun_year <- 39000/30
 lun_month <- (12*60+44+29*24*60)/30
 lun_day <- (24+50/60)*2
@@ -164,7 +165,8 @@ sun_day <- 48
 common_periods(buoy_fill)
 buoy_fill %>%
   model(
-    STL(log(V9) ~ season(period = lun_year)+       # 1 year
+    STL(log(V9) ~ 
+          season(period = lun_year)+       # 1 year
           season(period = lun_month)+  # months
           #season(period = 48*7)+   # weekly
           season(period = lun_day)+    # lunar daily
@@ -173,24 +175,29 @@ buoy_fill %>%
   ) %>%
   components() %>%
   autoplot() + labs(x = "Observation")
-buoy_fill %>%
-  model(
-    STL(log(V9) ~ #season(period = lun_year)+       # 1 year
-          season(period = lun_year),  # months
-          #season(period = 48*7)+   # weekly
-          #season(period = lun_day)+    # lunar daily
-          #season(period = sun_day),     # normal daily
-        robust = TRUE)
-  ) %>%
-  components() %>%
-  autoplot() + labs(x = "Observation")
+
+
 ```
 
-comments - Daniel
+Analyzing the seasonal decomposition of was difficult due to data having possibly multiple seasonalities. 
+Determining what those multiple seasonalities could be was also challenging. 
+
+Based on the some knowledge of the data, it's seasonalites could be related to the periods of the sun and the moon. 
+So trying out different lunar days, months and years in combination with solar days, months and years was returning the most significant results.
+
+What resembled the most seasonal components were the lunar year, lunar month, lunar day, and solar day. Each seemed to contain some level of seasonality, but none were perfect. 
 
 # Model fitting
 
- comments on k selection and why DHR was choice.
+Since the data seemed to contain multiple seasonalities and the seasonal periods were quite long, we choose to use Dynamic Harmonic Regression to try and fit the model. It was a method that was mentioned in the FPP3 text book and the package seemed to know how to deal with it reasonable well. 
+
+The idea behind it was to use a fourier terms to approximate the seasonal components of the model and to use an ARMA model to account for the short term dynamics. 
+
+The model looks like this: $y_t = bt + \sum_{j=1}{K}[\alpha_j sin(\frac{2\pi jt}{m})+\beta_j cos(\frac{2 \pi jt}{m})]+\eta_t$
+
+Where $\eta_t$ represents the ARMA process, $m$ is the seasonal period, $K$ is the number to fourier terms added up and $bt$ is similar to a drift term. 
+
+Selecting the values of K were done on the basis of AICc and a function was created to test all the values over the possible seasonal periods. However, the computations were very long, so the only K values that were tested were from 1:3. This process showed that from the values tested: K=1 for lunar year, K=1 for lunar month, and K=2 for solar day.
  
 ```{r, echo=FALSE}
 train_fitDHR <- model(buoy_train,
@@ -230,11 +237,13 @@ Comparing all four SARIMA models, m4 came to be the best model obtaining the low
 
 # Residual Analysis
 
-```{r, echo=FALSE}
+```{r ggplot2, echo=FALSE, warning = FALSE, out.width = "50%"}
 train_fitDHR %>% select(mk1) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk2) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk3) %>% gg_tsresiduals(lag = 50)
 train_fitDHR %>% select(mk4) %>% gg_tsresiduals(lag = 50)
+
+
 
 augment(train_fitDHR) %>%
   features(.innov,ljung_box,lag=50)
@@ -470,4 +479,6 @@ SARIMA_FC_long %>% autoplot(buoy_fill %>% slice(n()- 1000:0))  +
        title = "SARIMA  Long-Term Forecast for Substantial Wave Height") +
   guides(colour = guide_legend(title = "SARIMA Forecast"))
 ```
+# Future Considerations
 
+Seeing as the attempted models did not do a great job of forecasting the future values, incorporating predictors into the Dynamic Harmonic Regression model would be an interesting task. Since, we propose that wind, tide or other variables might have an effect on the significant wave height. There are numerous other predictor variables that could have an correlation with the our forecasted variable. Due to time and the scope of this project, they were not considered, but could potentially have positive results. This project has opened our eyes to the many other possibilities that could be done if forecasting time series. 
