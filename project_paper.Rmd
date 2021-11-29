@@ -212,7 +212,7 @@ sarima_fit <- buoy_train %>% model(auto = ARIMA(V9),
                            m2 = ARIMA(log(V9) ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
                            m3 = ARIMA(log(V9) ~ 0 + pdq(2,1,0) +PDQ(0,1,5,period = 16),
                                       order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
-                           m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
+                           m4 = ARIMA(log(V9) ~ 0 + pdq(d=1) + PDQ(,period = 16)))
 
 glance(sarima_fit)
 ```
