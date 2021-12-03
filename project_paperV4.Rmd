@@ -1,0 +1,468 @@
+---
+title: "Buoy Data"
+author: "Gutierrez, Mena, Thompson, Silva"
+date: "11/21/2021"
+output: pdf_document
+--- 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Import libraries ----
+library(astsa)
+library(fpp3)
+library(readr)
+library(lubridate)
+library(gridExtra)
+knitr::opts_chunk$set(out.width = "60%", out.height="60%", fig.align="center", warning=FALSE, message=FALSE)
+```
+# Abstract
+This particular data set comes from the Santa Monica Bay buoy collected by the National Data Buoy Center. The objective of testing this data set is to forecast the significant wave height in meters which is calculated as the highest one-third of all the wave heights during the 30 minute sampling period. Beginning with extracting the data from the ndbc.noaa.gov website, we data cleaned our data set and modified it to fit the desired intervals of 30 minutes since the time intervals were uneven. Our desired forecast model should be able to forecast six hours, one week, and 3 months into the future. Our first attempt was to design a SARIMA model to find the best fit. However, since we suspected there was multiple seasonalities, we proceeded with the Dynammic Harmonic Regression to further expand our search. Although the DHR was more successful than SARIMA fit, none of our models performed as desired. Hence, we concluded that we should select different predictors such as wind speed or wind direction to indicate when they are correlated with the significant wave height at certain values of h for future forcasting. 
+
+# Data Cleaning
+```{r, echo=FALSE}
+# Real time data (last 45 days)
+#b_data <- read.table("https://www.ndbc.noaa.gov/data/realtime2/46268.txt")
+#b_data <- read.table("https://www.ndbc.noaa.gov/data/realtime2/46268.txt")
+
+# Load Data ----
+#V1   2  3  4  5   6    7   8     9     10    11  12     13   14    15    16    17  18    19
+#YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS PTDY  TIDE
+#yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi  hPa    ft
+b_data <- read.table("https://www.ndbc.noaa.gov/view_text_file.php?filename=46221h2020.txt.gz&dir=data/historical/stdmet/")
+b_data19 <- read.table("https://www.ndbc.noaa.gov/view_text_file.php?filename=46221h2019.txt.gz&dir=data/historical/stdmet/")
+
+
+
+#Format the dates using a Date Class
+b_date <- paste(b_data[,1],"-",b_data[,2],"-",b_data[,3]," ",b_data[,4],":",b_data[,5]) 
+b_date <- ymd_hm(b_date,tz = "UTC")
+b_date19 <- paste(b_data19[,1],"-",b_data19[,2],"-",b_data19[,3]," ",b_data19[,4],":",b_data19[,5]) 
+b_date19 <- ymd_hm(b_date19,tz = "UTC")
+
+#7693 to 7694 is when the change of intervals happens 17:26 to 19:53
+#15416 to 15417 is when the change of intervals happens 20:23 to 22:26
+b_data %>% select(V9) -> data
+data$time <- b_date
+b_data19 %>% select(V9) -> data19
+data19$time <- b_date19
+
+# Attempt to fix the uneven time intervals as select times ----
+testies<-data$time[7694:15416]
+fixedTimes <- testies + minutes(3)
+data$time[7694:15416] <- fixedTimes
+
+testies19<-data19$time[1:9906]
+fixedTimes19 <- testies19 - minutes(4)
+data19$time[1:9906] <- fixedTimes19
+
+#which((data$time[2:16184]-data$time[1:16183])>30)
+
+newData <- rbind(data19,data)
+
+# Turn into a tsibble ----
+# using build_tsibble instead of as_tsibble to specify the interval  
+buoy_ts <- build_tsibble(
+  newData,
+  key = dplyr::starts_with("2019-01-01 00:26:00"),
+  index = time,
+  ordered = TRUE,
+  interval = new_interval(minute = 30),
+  validate = TRUE
+)
+
+
+# Address additional missing data points (Maurico) ----
+# TODO
+
+
+# Count all the missing data and make them NA values
+buoy_gaps <- buoy_ts %>%
+  count_gaps(.full = TRUE)
+buoy_ts <- buoy_ts %>% fill_gaps()
+
+#Try fixing missing data using interpolate from ARIMA model---
+buoy_fill <- buoy_ts %>% 
+  model(ARIMA(V9 ~ pdq(4,1,0) + PDQ(2,0,0), approximation = FALSE)) %>%
+  interpolate(buoy_ts)
+```
+
+## Comments on our data cleaning process.
+
+The data was pulled from the ndbc.noaa.gov website. There were many buoy locations to choose from where we could select one to pull from. We ended up getting the data by reading a url that contained a text file extension. From this extension we were able to read it into a table. Since our focus was on forecasting significant wave height we selected that column of data. The time intervals at first seemed to come in every 30 minutes.
+
+Our next task was to organize the dates and times associated with each data point. Since the data was organized in a way that the year, month, day, hour, minute, and seconds were each individual columns, we had to use concatenation to turn them into one column. Using a date class, we were able to create a new data set with each of the dates as a date object to be matched with the corresponding data points.
+
+Now that we had our time series data, we turned it into a tsibble object, using build_tsibble to specify the time intervals more clearly. We also took note that some of the intervals were not perfectly matched up (i.e. not exactly 30 min intervals at some points) This was most likely due to the actual buoy recording was not perfect. This was remedied by adding or subtracting 3 or 4 minutes to the times at certain sections of the data. 
+
+Next, we still had a few large gaps in our data due to missing data from the buoy. We used an ARIMA interpolation to fill in those missing gaps
+
+# Analysis
+
+```{r, include=FALSE}
+buoy_train <- buoy_fill %>% slice(5000:0- n()) # first 85% of buoy data
+buoy_test <- buoy_fill %>% slice(n()- 5000:0) # last 15% of buoy data
+```
+
+
+We started the analysis by breaking the data up into separate training and testing sets. We did all of the initial analysis and model fitting exclusively on the training set. Doing this was important to ensure that we were able to test the models we built using only the training set by checking how well they forecast into the testing set that contains known observations. Keeping the testing set quarantined from the training set during the process is crucial.
+
+## Transformations
+
+Next, we plotted the data and tried to identify trend and non-constant variance. If either one is present in the data, the data will not be stationary which would require us to make some transformations to the data before we are able to proceed with model fitting. 
+
+```{r, echo=FALSE}
+autoplot(buoy_fill,V9)
+```
+
+```{r}
+lambda <- buoy_train %>% 
+  features(V9, features = guerrero) %>%
+  pull(lambda_guerrero) ; lambda
+```
+
+```{r, echo=FALSE}
+buoy_fill %>% 
+  autoplot(box_cox(V9, lambda = lambda)) + 
+  labs(y = "",
+       title = latex2exp::TeX(paste0(
+         "Transformed Buoy Data with $\\lambda$ = ",
+         lambda,2)))
+
+buoy_fill %>% autoplot(log(V9)) +
+  labs(y = "",
+       title = latex2exp::TeX(paste0(
+         "Transformed Buoy Data with Log Transform")))
+```
+
+The data appears to have some non-constant variance with wildly varying magnitudes of lag heights throughout the two year period. To determine if a transformation is necessary, we performed a Box-Cox Test. The first thing we had to determine was an appropriate value for lambda to use in the Box Cox Test. For reference, $\lambda=1$ indicates no transformation is needed;  $\lambda=0.25$ indicates a fourth root transformation; and $\lambda=0$ indicates a log transformation is needed. Using a built in function in R, we determined that the suggest value is $\lambda = -0.00002945644$. Notice, that this value is extremely close to zero which suggests that using a simple log transformation is probably the best transformation to use. We plotted both transformations and found the two to be nearly identical. Thus, we decided to proceed with the rest analysis using a log transformation of the data. 
+
+## Differencing
+
+Once we determined that a log transformation was needed, we checked if the data needs to be differenced.
+
+```{r, echo=FALSE}
+buoy_train %>% gg_tsdisplay(log(V9),plot_type = "partial")
+
+buoy_train %>% gg_tsdisplay(difference(log(V9)),plot_type = "partial")
+
+# Unit Root Test
+buoy_train %>% features(difference(log(V9)), unitroot_kpss) 
+```
+
+The series appears level overall but the lags present in the ACF plot exhibit a very slow decay which indicates the data is nonstationary and should probably be differenced. Taking a single nonseasonal difference appears to have made the data stationary since there is no longer any slow decay in the ACF plot. There are also now lags with clear cutoffs and tailing behavior which is typically helpful in the model fitting process. If we choose to use a typical SARIMA model fitting, we now know we will need to use a model that has a nonseasonal difference order of $d=1$.
+
+In order to determine if another differencing is required, we performed a unit root test to test the stationarity of the nonseasonal difference(log(V9)). Since the p-value = 0.1 and is larger than $0.05$, it suggests that no further differencing is required. Hence, we only performed one nonseasonal difference after the log transformation.  
+
+#  STL Decomposition
+
+```{r, echo=FALSE}
+#STL decomp ----
+# Need to determine seasonal period(s)
+lun_year <- 39000/30
+lun_month <- (12*60+44+29*24*60)/30
+lun_day <- (24+50/60)*2
+sun_day <- 48
+common_periods(buoy_fill)
+buoy_fill %>%
+  model(
+    STL(log(V9) ~ 
+          season(period = lun_year)+       # 1 year
+          season(period = lun_month)+  # months
+          #season(period = 48*7)+   # weekly
+          season(period = lun_day)+    # lunar daily
+          season(period = sun_day),     # normal daily
+        robust = TRUE)
+  ) %>%
+  components() %>%
+  autoplot() + labs(x = "Observation")
+
+
+```
+
+Analyzing the seasonal decomposition of was difficult due to data having possibly multiple seasonalities. 
+Determining what those multiple seasonalities was also challenging.
+
+Based on the some knowledge of the data, it's seasonalites could be related to the periods of the sun and the moon. 
+So trying out different lunar days, months and years in combination with solar days, months and years was returning the most significant results.
+
+What resembled the most seasonal components were the lunar year, lunar month, lunar day, and solar day. Each seemed to contain some level of seasonality, but none were perfect. 
+
+# Model fitting
+
+Since the data seemed to contain multiple seasonalities and the seasonal periods were quite long, we choose to use Dynamic Harmonic Regression to try and fit the model. It was a method that was mentioned in the FPP3 text book and the package seemed to know how to deal with it reasonable well. 
+
+The idea behind it was to use a fourier terms to approximate the seasonal components of the model and to use an ARMA model to account for the short term dynamics. 
+
+The model looks like this: $y_t = bt + \sum_{j=1}{K}[\alpha_j sin(\frac{2\pi jt}{m})+\beta_j cos(\frac{2 \pi jt}{m})]+\eta_t$
+
+Where $\eta_t$ represents the ARMA process, $m$ is the seasonal period, $K$ is the number to fourier terms added up and $bt$ is similar to a drift term. 
+
+Selecting the values of K were done on the basis of AICc and a function was created to test all the values over the possible seasonal periods. However, the computations were very long, so the only K values that were tested were from 1:3. This process showed that from the values tested: K=1 for lunar year, K=1 for lunar month, and K=2 for solar day.
+ 
+```{r, echo=FALSE}
+train_fitDHR <- model(buoy_train,
+                      mk1 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                                    fourier(period = lun_year, K = 1)+
+                                    fourier(period = lun_month, K = 1)),
+                      mk2 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                                    fourier(period = lun_year, K = 2)+
+                                    fourier(period = lun_month, K = 3)+
+                                    fourier(period = lun_day, K = 2)),
+                      mk3 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                                    fourier(period = lun_year, K = 1)+
+                                    fourier(period = lun_month, K = 1)+
+                                    fourier(period = sun_day, K = 2)),
+                      mk4 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                                    fourier(period = lun_year, K = 3)+
+                                    fourier(period = lun_month, K = 1)+
+                                    fourier(period = lun_day, K = 2)+
+                                    fourier(period = sun_day, K = 3)))
+glance(train_fitDHR)%>%arrange(AICc)
+```
+
+```{r, echo=FALSE}
+# SARIMA model fit ----
+sarima_fit <- buoy_train %>% model(auto = ARIMA(log(V9)),
+                           m1 = ARIMA(log(V9) ~ 0 + pdq(5,1,0) +PDQ(2,0,0,period = 24)),
+                           m2 = ARIMA(log(V9) ~ 0 + pdq(4,1,0) +PDQ(2,0,0,period = 2)),
+                           m3 = ARIMA(log(V9) ~ 0 + pdq(2,1,0) +PDQ(0,0,5,period = 16),
+                                      order_constraint = p+q+P+Q<=10&(constant+d+D<=3)),
+                           m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
+
+glance(sarima_fit) %>% arrange(AICc)
+```
+In order to compare the AICc's values across ARIMA models, we kept the differences the same where $d=1$ and $D=0$ since we only performed one nonseasonal difference. Within this model it was difficult to see any significant seasonal pattern and therefore we chose arbitrary numbers for 's' resulting in our choices of period 2 (1 hour), period 16 (8 hours) and period 24 (12 hours).
+
+After observing the PACF for the nonseasonal AR component, we tested the first ARIMA model to have a nonseasonal AR(6) component because the ACF plot looks like it is tailing off and the PACF cuts off at lag 6. However, we did think that probably the PACF was cutting off at lag 2 and the rest of the lags could be part of the seasonal AR component. Therefore we also tested nonseasonal AR(4) (m2) since its the highest positive spike in the PACF, and AR(2) (m3). Similarly, we tested for the MA component by looking at the ACF and decided to keep its nonseasonal components at 0 since it looks like it is tailing off. However, for m3 we decided to assign a seasonal MA(5) with a period of 16 since the lags are decreasing. 
+
+Therefore our SARIMA models were m1 = ARIMA(5,1,0)(2,0,0)[24], m2 = ARIMA(4,1,0)(2,0,0)[2], m3 = ARIMA(2,1,0)(0,0,5)[16], m4 = ARIMA(1,1,3)(1,0,1)[16] and auto = ARIMA(1,1,3). Comparing all five SARIMA models, m4 came to be the best model obtaining the lowest AICc value of -85771.90 with SARIMA model ARIMA(1,1,3)(1,0,1)[16] where the seasonality is 16 time unit intervals of 30 minutes each (every 8 hours). Although we ran the auto ARIMA model to help us choose better models, we noticed that the output was an ARIMA model instead of a SARIMA model. This was not expected since we were testing for SARIMA models. However, we were able to beat its AICc score by obtaining a lower score, therefore we kept our m4 model as the best model.
+
+# Residual Analysis
+
+```{r ggplot2, echo=FALSE, warning = FALSE, out.width = "50%"}
+train_fitDHR %>% select(mk1) %>% gg_tsresiduals(lag = 50)
+train_fitDHR %>% select(mk2) %>% gg_tsresiduals(lag = 50)
+train_fitDHR %>% select(mk3) %>% gg_tsresiduals(lag = 50)
+train_fitDHR %>% select(mk4) %>% gg_tsresiduals(lag = 50)
+
+
+
+augment(train_fitDHR) %>%
+  features(.innov,ljung_box,lag=50)
+
+#RMSE
+  res1 <- residuals(train_fitDHR %>% select(mk1))
+  res1 <- res1$.resid
+  #MAE <- sum(abs(res))/length()
+  RSS1 <- sum(res1^2)
+  MSE1 <- RSS1/28071
+  RMSE1 <- sqrt(MSE1)
+  
+  res2 <- residuals(train_fitDHR  %>% select(mk2))
+  res2 <- res2$.resid
+  #MAE <- sum(abs(res))/length()
+  RSS2 <- sum(res2^2)
+  MSE2 <- RSS2/28071
+  RMSE2 <- sqrt(MSE2)
+  
+  res3 <- residuals(train_fitDHR  %>% select(mk3))
+  res3 <- res3$.resid
+  #MAE <- sum(abs(res))/length()
+  RSS3 <- sum(res3^2)
+  MSE3 <- RSS3/28071
+  RMSE3 <- sqrt(MSE3)
+  
+  res4 <- residuals(train_fitDHR %>% select(mk4))
+  res4 <- res4$.resid
+  #MAE <- sum(abs(res))/length()
+  RSS4 <- sum(res4^2)
+  MSE4 <- RSS4/28071
+  RMSE4 <- sqrt(MSE4)
+  
+  table_RMSE <- c(RMSE_mk1 = RMSE1,
+                  RMSE_mk2 = RMSE2,
+                  RMSE3_mk3 = RMSE3,
+                  RMSE4_mk4 = RMSE4)
+  table_RMSE
+```
+(i) Looking at all the residual plots, the residuals from all models (mk1, mk2, mk3, mk4) are normally distributed and all have mean zero with only outlier present on each model located on the furthest right end of the plot. Bootstrap isn't necessary in this case.
+
+(ii) All models appear to have constant variance, so we have nothing to be alarmed of.
+
+(iii) In each ACF plot we have significant lags that appear at lags $h = 12, 17, 19, 38, 46, 47, 48$. Therefore, we have some significant autocorrelation that is most apparent every 6 hours.
+
+(iv) Inspecting the AICc scores, model mk4 is the best model with the lowest AICc score of -85955.16 
+(v) The Ljung-Box test statistics all had very small p-values, meaning our residuals seem to not do well in forecasting these models. However, the model(s) that faired the best were mk1 and mk2. This means that we do not have sufficient evidence to reject our null hypothesis, that our residuals
+appear to be correlated and could be improved.
+
+(iv) All RMSE were all really close within one another, however the best model with the lowest RMSE (Root Mean Squared Error) is model mk4 with an RMSE value of 0.05968510. Minimizing this value, will result in forecasts of the mean.
+
+# Forecast Testing
+
+```{r, echo=FALSE}
+
+buoy_TestFC <- train_fitDHR %>% select(mk3) %>% forecast(h=5000)
+
+buoy_TestFC_short <- train_fitDHR %>% select(mk3) %>% forecast(h=336)
+
+buoy_TestFC %>% autoplot(buoy_fill %>% tail(6000))  +
+  labs(y = "Wave Hieght",
+       title = "Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+buoy_TestFC_short %>% autoplot(buoy_fill %>% tail(6000) %>% head(1336))  +
+  labs(y = "Wave Hieght",
+       title = "Short-Term Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+Once we identified the best model (mk3), we fitted it to the training set which is made up data from January 1, 2019 - September 18, 2020. We then produced a forecast from the end of the training set (Sept. 18) through the entire testing set which ends on December 31, 2020. Based on this forecast we assessed the models ability to accurately forecast in the short-term (6 - 24 hours), mid-term (7 days), and the long-term (remainder of the year).
+
+The majority of the data in the forecast lies within the confidence intervals and the number of data points falling outside of the confidence intervals seems reasonable. Over the long term, this forecast isn't too useful which seems reasonable considering how unrealistic it would be to predict ocean wave heights that far out into the future with any kind of precision. To take a closer look, we zoomed in to view only the first week of the forecast into the testing set. At this scale, the forecast appears to be much more reasonable in the mid-term and even more so in the short-term.
+
+
+# Forecasting 
+```{r, echo=FALSE}
+best_fitDHR <-  model(buoy_fill,
+                      mk4 = ARIMA(log(V9) ~ PDQ(0,0,0)+pdq(d=0)+
+                                    fourier(period = lun_year, K = 1)+
+                                    fourier(period = lun_month, K = 1)+
+                                    fourier(period = sun_day, K = 2)))
+```
+
+```{r}
+
+buoy_FC <- best_fitDHR %>% forecast(h=5000)
+
+buoy_FC_short <- best_fitDHR %>% forecast(h=500)
+
+buoy_FC %>% autoplot(buoy_fill %>% tail(1000)) +
+  labs(y = "Wave Hieght",
+       title = "DHR Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+buoy_FC_short %>% autoplot(buoy_fill %>% tail(1000))  +
+  labs(y = "Wave Hieght",
+       title = " DHR Short-Term Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+
+For our actual forecast, we fit the model to the entire dataset, including both the training and testing sets, and then foretasted into the future. Since we determined a long-term forecast was not reliable, we were really only focused on a shorter term forecast. The confidence intervals start out fairly wide but it appears that this forecast is reasonable for the first several hours out to a day or two at most. After that, the forecast begins quickly reverting to the sinusoidal pattern that is not useful over the long-term.
+
+# Alternative SARIMA Forecast
+
+We spent the majority of the project attempting create a forecast for this data using Dynammic Harmonic Regression. We ambitiously attempted to capture the multiple seasonalities within this data. Unfortunately, this proved to be very complicated and computationally taxing. We decided to try forecast using a SARIMA model. We were able to come up with a model that had a lower AICc than the model that the Hydman-Kandakar Algorithym suggested.
+
+```{r}
+glance(sarima_fit)%>%arrange(AICc)
+```
+Using this model we did a quick residual analysis.
+
+```{r, echo=FALSE}
+sarima_fit %>% select(m1) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m2) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m3) %>% gg_tsresiduals(lag = 50)
+sarima_fit %>% select(m4) %>% gg_tsresiduals(lag = 50)
+
+augment(sarima_fit) %>%
+  features(.innov,ljung_box,lag=50)
+
+ resauto <- residuals(sarima_fit %>% select(auto))
+  resauto <- resauto$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSauto <- sum(resauto^2)
+  MSEauto <- RSSauto/28071
+  RMSEauto <- sqrt(MSEauto)
+  
+    resm1 <- residuals(sarima_fit %>% select(m1))
+  resm1 <- resm1$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm1 <- sum(resm1^2)
+  MSEm1 <- RSSm1/28071
+  RMSEm1 <- sqrt(MSEm1)
+  
+  resm2 <- residuals(sarima_fit  %>% select(m2))
+  resm2 <- resm2$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm2 <- sum(resm2^2)
+  MSEm2 <- RSSm2/28071
+  RMSEm2 <- sqrt(MSEm2)
+  
+  resm3 <- residuals(sarima_fit  %>% select(m3))
+  resm3 <- resm3$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm3 <- sum(resm3^2)
+  MSEm3 <- RSSm3/28071
+  RMSEm3 <- sqrt(MSEm3)
+  
+  resm4 <- residuals(sarima_fit %>% select(m4))
+  resm4 <- resm4$.resid
+  #MAE <- sum(abs(res))/length()
+  RSSm4 <- sum(resm4^2)
+  MSEm4 <- RSSm4/28071
+  RMSEm4 <- sqrt(MSEm4)
+  
+  table_RMSEmmods <- c(RMSE_m1 = RMSEm1,
+                  RMSE_m2 = RMSEm2,
+                  RMSE3_m3 = RMSEm3,
+                  RMSE4_m4 = RMSEm4)
+  table_RMSEmmods
+```
+(i)  Now observing the count plots for models auto, m1, m2, m3, m4, the residuals on all models are normally distributed, with only a few outliers apparent, which we can assume that it will not affect our forecasts.
+
+(ii) Models auto, and m1 - m4 appear to also have constant variance, we do see evenly spaced out spikes, which could be due to seasonality in our time series.
+
+(iii) In models auto and m1 - m4, their ACF plots also express the same behavior where we have several significant lags where the most common significant lags are $h = 46, 47, 48$ for all models. We do have one exception, model m3 has its most significant lags at $h = 3, 4$. Henceforth, our residuals in all our models appear to be correlated.
+
+(iv) Out of our SARIMA models, model m4 is the best with an AICc score of -85771.90.
+     
+(v) For our SARIMA models, all models m1 - m4 have infinitecimally small numbers, therefore we can not accept our null hypothesis and therefore do not have sufficient evidence that our residuals appear to be correlated. 
+
+(iv) All RMSE values for models auto - m4 were also close within one another, but if we were to pick, we would choose the smallest values, which is models m4, giving an RMSE value of 0.06021139.
+
+```{r, echo=FALSE}
+Test_SARIMA_fit <- model( buoy_train, 
+                      m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
+
+SARIMA_TestFC <- Test_SARIMA_fit %>% forecast(h=5000)
+
+SARIMA_TestFC_short <- Test_SARIMA_fit %>% forecast(h=336)
+
+SARIMA_TestFC %>% autoplot(buoy_fill %>% tail(6000))  +
+  labs(y = "Wave Hieght",
+       title = "SARIMA Test Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+SARIMA_TestFC_short %>% autoplot(buoy_fill %>% tail(6000) %>% head(1336))  +
+  labs(y = "Wave Hieght",
+       title = "SARIMA Test Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+Overall, all the SARIMA forecast did not perform any better that the forecast we made using dynamic harmonic regression. The confidence intervals shoot up exponentially severely enough to change the scale of the plot and make the data appear as a flattened line. One major issue is that we expect to see roughly 5% of the data points fall outside of the confidence intervals (for a 95% CI) but these confidence intervals capture 100% of the data points which is problematic and  probably makes this forecast nonviable. Zooming in on the this forecast, we can see that once again the forecast appears to perform decently within the first couple of days but since the forecast for this model is questionable overall, we can conclude that this forecast is not really reliable.
+```{r, echo=FALSE}
+Best_SARIMA_fit <- model( buoy_fill, 
+                      m4 = ARIMA(log(V9) ~ 0 + pdq() + PDQ(,period = 16)))
+
+SARIMA_FC <- Best_SARIMA_fit %>% forecast(h=5000)
+
+SARIMA_FC_short <- Best_SARIMA_fit %>% forecast(h=336)
+
+SARIMA_FC %>% autoplot(buoy_fill %>% tail(6000))  +
+  labs(y = "Wave Hieght",
+       title = "SARIMA Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+SARIMA_FC_short %>% autoplot(buoy_fill %>% tail(6000))  +
+  labs(y = "Wave Hieght",
+       title = "SARIMA Forecast for Substantial Wave Height") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+This SARIMA forecast is definitely unusable in the long-term and appears potentially usable in the very short term but there is a lot more work that needs to be done to make this forecast reliable. 
+
+# Conclusions and Future Considerations
+
+The forecast that was developed using Dynamic Harmonic Regression appears to be much more reliable than the model we developed using SARIMA models. There is definitely is a lot of room for improvement in the model selection process for the SARIMA forecast. Based on the ACF plot of the residuals, the residuals appear correlated and it appears there is some seasonality present that our models failed to capture. Improving these models is probably one aspect that would drastically improve our forecast. 
+
+Additionally, there is also a lot of room for improvement in the Dynamic Harmonic Regression model. Seeing as the attempted models did not do a great job of forecasting the future values, incorporating more predictors into the model would be an interesting task. Since, we propose that wind, tide or other variables might have an effect on the significant wave height. There are numerous other predictor variables that could have an correlation with the our foretasted variable. Due to time and the scope of this project, they were not considered, but could potentially have positive results. This project has opened our eyes to the many other possibilities that could be done if forecasting time series. 
